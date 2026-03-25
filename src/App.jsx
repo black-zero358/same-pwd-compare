@@ -67,54 +67,7 @@ export default function App() {
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
-
-    setFileName(file.name);
-    setError('');
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target.result;
-        const parsedRows = parseCSV(text);
-
-        if (parsedRows.length < 2) {
-          throw new Error('CSV 文件似乎为空或格式不正确。');
-        }
-
-        // 获取表头并转换为小写以方便匹配
-        const headers = parsedRows[0].map((h) => h.trim().toLowerCase());
-        
-        // 验证必需的列是否存在 (至少需要 login_password)
-        if (!headers.includes('login_password')) {
-          throw new Error('未找到名为 "login_password" 的列。请确保上传的是正确的导出文件。');
-        }
-
-        // 将数据行映射为对象数组
-        const jsonData = parsedRows.slice(1).map((row) => {
-          const rowData = {};
-          headers.forEach((header, index) => {
-            rowData[header] = row[index] || '';
-          });
-          return rowData;
-        });
-
-        // 过滤掉完全空的数据行
-        const validData = jsonData.filter(item => 
-          Object.values(item).some(val => val.trim() !== '')
-        );
-
-        setData(validData);
-      } catch (err) {
-        setError(err.message);
-        setData([]);
-      }
-    };
-
-    reader.onerror = () => {
-      setError('读取文件时出错。');
-    };
-
-    reader.readAsText(file);
+    handleFileFromObject(file);
   };
 
   // 触发隐藏的文件输入框
@@ -156,6 +109,7 @@ export default function App() {
   // 标签页状态与可见密码状态
   const [activeTab, setActiveTab] = useState('search'); // 'search' | 'analyze'
   const [visibleReused, setVisibleReused] = useState(new Set());
+  const [isDragging, setIsDragging] = useState(false);
 
   // 切换单个重用密码的明暗文显示
   const toggleVisibleReused = (pwd) => {
@@ -165,6 +119,84 @@ export default function App() {
       else next.add(pwd);
       return next;
     });
+  };
+
+  // 全部显示 / 全部隐藏重用密码
+  const allReusedVisible = reusedPasswords.length > 0 && reusedPasswords.every(g => visibleReused.has(g.password));
+  const toggleAllReusedVisible = () => {
+    if (allReusedVisible) {
+      setVisibleReused(new Set());
+    } else {
+      setVisibleReused(new Set(reusedPasswords.map(g => g.password)));
+    }
+  };
+
+  // 拖拽上传处理
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    handleFileFromObject(file);
+  };
+
+  // 抽取文件处理逻辑，供上传和拖拽共用
+  const handleFileFromObject = (file) => {
+    setFileName(file.name);
+    setError('');
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const parsedRows = parseCSV(text);
+
+        if (parsedRows.length < 2) {
+          throw new Error('CSV 文件似乎为空或格式不正确。');
+        }
+
+        const headers = parsedRows[0].map((h) => h.trim().toLowerCase());
+
+        if (!headers.includes('login_password')) {
+          throw new Error('未找到名为 "login_password" 的列。请确保上传的是正确的导出文件。');
+        }
+
+        const jsonData = parsedRows.slice(1).map((row) => {
+          const rowData = {};
+          headers.forEach((header, index) => {
+            rowData[header] = row[index] || '';
+          });
+          return rowData;
+        });
+
+        const validData = jsonData.filter(item =>
+          Object.values(item).some(val => val.trim() !== '')
+        );
+
+        setData(validData);
+      } catch (err) {
+        setError(err.message);
+        setData([]);
+      }
+    };
+
+    reader.onerror = () => {
+      setError('读取文件时出错。');
+    };
+
+    reader.readAsText(file);
   };
 
   return (
@@ -202,7 +234,12 @@ export default function App() {
               
               <div 
                 onClick={triggerFileInput}
-                className="border-2 border-dashed border-gray-300 hover:border-indigo-500 hover:bg-indigo-50 transition-colors rounded-xl p-8 text-center cursor-pointer flex flex-col items-center justify-center gap-3"
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer flex flex-col items-center justify-center gap-3 transition-colors ${
+                  isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300 hover:border-indigo-500 hover:bg-indigo-50'
+                }`}
               >
                 <input 
                   type="file" 
@@ -215,13 +252,13 @@ export default function App() {
                   <>
                     <FileText className="w-10 h-10 text-indigo-600" />
                     <p className="text-indigo-900 font-medium">已加载: {fileName}</p>
-                    <p className="text-sm text-gray-500">共读取到 {data.length} 条有效记录。点击重新上传。</p>
+                    <p className="text-sm text-gray-500">共读取到 {data.length} 条有效记录。点击或拖拽重新上传。</p>
                   </>
                 ) : (
                   <>
                     <Upload className="w-10 h-10 text-gray-400" />
-                    <p className="text-gray-700 font-medium">点击此处选择 CSV 文件</p>
-                    <p className="text-sm text-gray-500">支持包含 login_password 列的标准格式</p>
+                    <p className="text-gray-700 font-medium">点击或拖拽 CSV 文件到此处</p>
+                    <p className="text-sm text-amber-600 font-medium">目前仅支持 BitWarden CSV 导出格式文件</p>
                   </>
                 )}
               </div>
@@ -288,10 +325,20 @@ export default function App() {
             {activeTab === 'analyze' && (
               <div className="text-sm text-gray-600 bg-blue-50 p-4 rounded-xl flex items-start gap-3 border border-blue-100 animate-in fade-in duration-300">
                  <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                 <div>
+                 <div className="flex-1">
                    <p className="font-medium text-blue-900 mb-1">自动分析结果</p>
                    <p>已扫描您的整个密码库，找出所有被多次使用的相同密码。共发现 <strong className="text-blue-700">{reusedPasswords.length}</strong> 组重用密码。</p>
                  </div>
+                 {reusedPasswords.length > 0 && (
+                   <button
+                     onClick={toggleAllReusedVisible}
+                     className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors flex-shrink-0"
+                     title={allReusedVisible ? '隐藏所有密码' : '显示所有密码'}
+                   >
+                     {allReusedVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                     {allReusedVisible ? '隐藏全部' : '显示全部'}
+                   </button>
+                 )}
               </div>
             )}
           </div>
